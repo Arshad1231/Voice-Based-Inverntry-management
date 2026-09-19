@@ -102,21 +102,32 @@ export const createInventoryItem = async (item) => {
 
   return data;
 };
-export const processVoiceCommand = async (transcript) => {
-  const response = await fetch(`${API_URL}/voice/command`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      transcript,
-    }),
-  });
+
+
+export const processVoiceCommand = async (
+  transcript,
+  pendingCommand = null
+) => {
+  const response = await fetch(
+    `${API_URL}/voice/command`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        transcript,
+        pendingCommand,
+      }),
+    }
+  );
 
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(data.message);
+    const error = new Error(data.message);
+    error.data = data.data;
+    throw error;
   }
 
   return data;

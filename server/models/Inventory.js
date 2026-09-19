@@ -35,8 +35,16 @@ const inventorySchema = new mongoose.Schema(
 
 // Prevent exact duplicate names
 inventorySchema.index(
-  { name: 1 },
-  { unique: true }
+  {
+    name: 1,
+  },
+  {
+    unique: true,
+    collation: {
+      locale: "en",
+      strength: 2,
+    },
+  }
 );
 
 const Inventory = mongoose.model("Inventory", inventorySchema);

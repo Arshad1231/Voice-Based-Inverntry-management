@@ -40,7 +40,8 @@ function Dashboard() {
   } = useVoice();
 
   const [voiceProcessing, setVoiceProcessing] = useState(false);
-  const [voiceResult, setVoiceResult] = useState("");
+const [voiceResult, setVoiceResult] = useState("");
+const [pendingVoiceCommand, setPendingVoiceCommand] = useState(null);
 
   // ============================================================
   // LOAD DASHBOARD
@@ -124,29 +125,59 @@ function Dashboard() {
   // PROCESS VOICE COMMAND
   // ============================================================
 
-  const handleVoiceCommand = async () => {
-    if (!transcript.trim()) {
-      return;
-    }
+const handleVoiceCommand = async () => {
+  if (!transcript.trim()) {
+    return;
+  }
 
-    try {
-      setVoiceProcessing(true);
-      setVoiceResult("");
+  try {
+    setVoiceProcessing(true);
+    setVoiceResult("");
 
-      const result = await processVoiceCommand(
-        transcript
+    const result = await processVoiceCommand(
+      transcript,
+      pendingVoiceCommand
+    );
+
+    setVoiceResult(result.message);
+
+    // ------------------------------------------------------
+    // Check if backend is asking for confirmation
+    // ------------------------------------------------------
+
+    if (
+      result.data?.action ===
+      "CONFIRM_CREATE_ITEM"
+    ) {
+      setPendingVoiceCommand(
+        result.data.pendingCommand
       );
-
-      setVoiceResult(result.message);
-
-      // Refresh inventory, low stock and transactions
-      await loadDashboard();
-    } catch (error) {
-      setVoiceResult(error.message);
-    } finally {
-      setVoiceProcessing(false);
+    } else {
+      // Command completed or was cancelled
+      setPendingVoiceCommand(null);
     }
-  };
+
+    await loadDashboard();
+
+  } catch (error) {
+    setVoiceResult(error.message);
+
+    // ------------------------------------------------------
+    // Backend may still return a pending command
+    // ------------------------------------------------------
+
+    if (
+      error.data?.action ===
+      "CONFIRM_CREATE_ITEM"
+    ) {
+      setPendingVoiceCommand(
+        error.data.pendingCommand
+      );
+    }
+  } finally {
+    setVoiceProcessing(false);
+  }
+};
 
   // ============================================================
   // LOADING SCREEN
@@ -303,6 +334,27 @@ function Dashboard() {
                 <p className="mt-1 text-sm text-white">
                   {voiceResult}
                 </p>
+
+                {pendingVoiceCommand && (
+                  <div className="mt-4 rounded-xl bg-blue-500/10 p-4">
+                    <p className="text-sm font-semibold text-blue-300">
+                      Confirmation required
+                    </p>
+
+                    <p className="mt-1 text-sm text-slate-300">
+                      Say <strong>Yes</strong> to add{" "}
+                      <strong>
+                        {pendingVoiceCommand.item}
+                      </strong>{" "}
+                      with{" "}
+                      <strong>
+                        {pendingVoiceCommand.quantity}{" "}
+                        {pendingVoiceCommand.unit}
+                      </strong>
+                      .
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
