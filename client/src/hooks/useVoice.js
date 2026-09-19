@@ -1,100 +1,220 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+
+const API_URL = "http://localhost:3000/api";
 
 function useVoice() {
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] =
+    useState(false);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState("");
 
-  const recognitionRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
-  useEffect(() => {
-    const SpeechRecognition =
-      window.SpeechRecognition ||
-      window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setError(
-        "Speech recognition is not supported in this browser."
-      );
+  const startListening = async () => {
+    if (isListening || isTranscribing) {
       return;
     }
-
-    const recognition = new SpeechRecognition();
-
-    recognition.continuous = false;
-    recognition.interimResults = true;
-
-    // Indian English for now
-    recognition.lang = "en-IN";
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setError("");
-    };
-
-    recognition.onresult = (event) => {
-      let text = "";
-
-      for (
-        let i = event.resultIndex;
-        i < event.results.length;
-        i++
-      ) {
-        text += event.results[i][0].transcript;
-      }
-
-      setTranscript(text);
-    };
-
-    recognition.onerror = (event) => {
-      console.error("Speech recognition error:", event.error);
-
-      setIsListening(false);
-
-      if (event.error === "not-allowed") {
-        setError("Microphone permission was denied.");
-      } else if (event.error === "no-speech") {
-        setError("No speech detected. Please try again.");
-      } else {
-        setError("Voice recognition failed. Please try again.");
-      }
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      recognition.stop();
-    };
-  }, []);
-
-  const startListening = () => {
-    if (!recognitionRef.current) {
-      setError("Speech recognition is unavailable.");
-      return;
-    }
-
-    setTranscript("");
-    setError("");
 
     try {
-      recognitionRef.current.start();
+      setError("");
+      setTranscript("");
+
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError(
+          "Microphone recording is not supported in this browser."
+        );
+        return;
+      }
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+
+      const mediaRecorder =
+        new MediaRecorder(stream);
+
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(
+            event.data
+          );
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        try {
+          setIsListening(false);
+          setIsTranscribing(true);
+
+          stream
+            .getTracks()
+            .forEach((track) => track.stop());
+
+          const audioBlob = new Blob(
+            audioChunksRef.current,
+            {
+              type: mediaRecorder.mimeType,
+            }
+          );
+
+          console.log(
+            "Audio recorded:",
+            {
+              type: audioBlob.type,
+              size: audioBlob.size,
+            }
+          );
+
+          await sendAudioForTranscription(
+            audioBlob
+          );
+        } catch (error) {
+          console.error(
+            "Audio transcription error:",
+            error
+          );
+
+          setError(
+            error.message ||
+              "Failed to transcribe audio."
+          );
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      mediaRecorderRef.current =
+        mediaRecorder;
+
+      mediaRecorder.start();
+
+      console.log(
+        "Recording started"
+      );
+
+      setIsListening(true);
     } catch (error) {
-      console.log("Recognition already started.");
+      console.error(
+        "Microphone error:",
+        error
+      );
+
+      if (
+        error.name === "NotAllowedError"
+      ) {
+        setError(
+          "Microphone permission was denied."
+        );
+      } else if (
+        error.name === "NotFoundError"
+      ) {
+        setError(
+          "No microphone was found."
+        );
+      } else {
+        setError(
+          "Unable to access the microphone."
+        );
+      }
+
+      setIsListening(false);
     }
   };
 
   const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
+    const recorder =
+      mediaRecorderRef.current;
+
+    if (
+      recorder &&
+      recorder.state !== "inactive"
+    ) {
+      console.log(
+        "Recording stopped"
+      );
+
+      recorder.stop();
     }
   };
 
+  const sendAudioForTranscription =
+    async (audioBlob) => {
+      const formData =
+        new FormData();
+
+      const extension =
+        audioBlob.type.includes("webm")
+          ? "webm"
+          : "wav";
+
+      formData.append(
+        "audio",
+        audioBlob,
+        `voice-command.${extension}`
+      );
+
+      console.log(
+        "Sending audio to Whisper:",
+        {
+          type: audioBlob.type,
+          size: audioBlob.size,
+        }
+      );
+
+      const response =
+        await fetch(
+          `${API_URL}/voice/transcribe`,
+          {
+            method: "POST",
+            body: formData,
+          }
+        );
+
+      const data =
+        await response.json();
+
+      console.log(
+        "Whisper response:",
+        data
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Whisper transcription failed."
+        );
+      }
+
+      const text =
+        data.data?.transcript ||
+        "";
+
+      if (!text.trim()) {
+        throw new Error(
+          "No speech was detected."
+        );
+      }
+
+      console.log(
+        "Transcript received:",
+        text
+      );
+
+      setTranscript(
+        text.trim()
+      );
+
+      return text.trim();
+    };
+
   return {
     isListening,
+    isTranscribing,
     transcript,
     error,
     startListening,

@@ -1,83 +1,107 @@
-// ============================================================
-// INTENT WORDS
-// ============================================================
-
-const ADD_WORDS = [
+const ADD_ACTIONS = [
   "add",
   "increase",
-  "stock",
   "put",
+  "stock",
 ];
 
-const REMOVE_WORDS = [
+const REMOVE_ACTIONS = [
   "remove",
-  "sell",
-  "sold",
   "decrease",
   "take",
+  "sell",
+  "sold",
 ];
 
-const CHECK_WORDS = [
-  "check",
-  "show",
+const CHECK_PHRASES = [
   "how much",
   "how many",
+  "how much do we have",
+  "how much is there",
+  "how many are there",
+  "what is the stock",
+  "what's the stock",
+  "whats the stock",
   "stock of",
+  "stock for",
+  "check stock",
+  "check",
+  "show stock",
+  "show me",
+  "show",
 ];
 
-
-// ============================================================
-// FILLER WORDS
-// ============================================================
-
-const FILLER_WORDS = [
-  "of",
+const FILLER_PHRASES = [
+  "can you",
+  "could you",
+  "would you",
+  "please",
+  "i want to",
+  "i need to",
+  "i would like to",
+  "i'd like to",
+  "for me",
+  "let me",
+  "give me",
   "the",
   "some",
+  "of",
+  "by",
+  "are",
+  "is",
+  "there",
+  "do we have",
 ];
 
+const UNIT_ALIASES = {
+  kilograms: "kg",
+  kilogram: "kg",
+  kilos: "kg",
+  kilo: "kg",
+  kgs: "kg",
+  kg: "kg",
 
-// ============================================================
-// UNIT WORDS
-// ============================================================
+  grams: "g",
+  gram: "g",
+  g: "g",
 
-const UNIT_WORDS = [
-  "kilograms",
-  "kilogram",
-  "kgs",
-  "kg",
+  bags: "bags",
+  bag: "bags",
 
-  "grams",
-  "gram",
-  "g",
+  boxes: "boxes",
+  box: "boxes",
 
-  "bags",
-  "bag",
+  cartons: "cartons",
+  carton: "cartons",
 
-  "boxes",
-  "box",
+  pieces: "pieces",
+  piece: "pieces",
+  pcs: "pieces",
+  pc: "pieces",
 
-  "cartons",
-  "carton",
+  packets: "packets",
+  packet: "packets",
+  packs: "packets",
+  pack: "packets",
 
-  "pieces",
-  "piece",
+  bottles: "bottles",
+  bottle: "bottles",
 
-  "packets",
-  "packet",
+  liters: "liters",
+  litre: "liters",
+  litres: "liters",
+  liter: "liters",
+  l: "liters",
 
-  "bottles",
-  "bottle",
-];
-
-
-// ============================================================
-// SPOKEN NUMBER WORDS
-// ============================================================
+  milliliters: "ml",
+  milliliter: "ml",
+  millilitres: "ml",
+  millilitre: "ml",
+  ml: "ml",
+};
 
 const NUMBER_WORDS = {
   zero: 0,
-
   one: 1,
   two: 2,
   three: 3,
@@ -88,7 +112,6 @@ const NUMBER_WORDS = {
   eight: 8,
   nine: 9,
   ten: 10,
-
   eleven: 11,
   twelve: 12,
   thirteen: 13,
@@ -98,364 +121,312 @@ const NUMBER_WORDS = {
   seventeen: 17,
   eighteen: 18,
   nineteen: 19,
-
   twenty: 20,
+  thirty: 30,
+  forty: 40,
+  fifty: 50,
+  sixty: 60,
+  seventy: 70,
+  eighty: 80,
+  ninety: 90,
+  hundred: 100,
+  thousand: 1000,
 };
-
-
-// ============================================================
-// NORMALIZE TEXT
-// ============================================================
 
 const normalizeText = (text) => {
   return text
     .toLowerCase()
-    .replace(/[.,!?]/g, "")
+    .replace(/[?!,.:;]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 };
 
+const escapeRegex = (text) => {
+  return text.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
+  );
+};
 
-// ============================================================
-// DETECT INTENT
-// ============================================================
+const removePhrase = (text, phrase) => {
+  const regex = new RegExp(
+    `\\b${escapeRegex(phrase)}\\b`,
+    "gi"
+  );
+
+  return text.replace(regex, " ");
+};
+
+const removePhrases = (text, phrases) => {
+  let result = text;
+
+  const sorted = [...phrases].sort(
+    (a, b) => b.length - a.length
+  );
+
+  for (const phrase of sorted) {
+    result = removePhrase(result, phrase);
+  }
+
+  return result;
+};
+
+/*
+ * Converts:
+ *
+ * "twenty five"
+ * "one hundred"
+ * "two hundred fifty"
+ * "one thousand two hundred"
+ *
+ * into numbers.
+ */
+const parseNumberWords = (text) => {
+  const words = text.split(/\s+/).filter(Boolean);
+
+  let total = 0;
+  let current = 0;
+  let found = false;
+
+  for (const word of words) {
+    if (!(word in NUMBER_WORDS)) {
+      continue;
+    }
+
+    found = true;
+
+    const value = NUMBER_WORDS[word];
+
+    if (value === 100) {
+      current = current === 0 ? 100 : current * 100;
+    } else if (value === 1000) {
+      total +=
+        (current === 0 ? 1 : current) * 1000;
+
+      current = 0;
+    } else {
+      current += value;
+    }
+  }
+
+  if (!found) {
+    return null;
+  }
+
+  return total + current;
+};
+
+const extractQuantity = (text) => {
+  // First try normal numbers.
+  const numericMatch = text.match(
+    /\b\d+(?:\.\d+)?\b/
+  );
+
+  if (numericMatch) {
+    return {
+      quantity: Number(numericMatch[0]),
+      matchedText: numericMatch[0],
+    };
+  }
+
+  /*
+   * Try spoken numbers.
+   *
+   * Example:
+   * "twenty five bags rice"
+   */
+  const words = text.split(/\s+/);
+
+  let bestMatch = null;
+
+  for (let start = 0; start < words.length; start++) {
+    let candidateWords = [];
+
+    for (
+      let end = start;
+      end < Math.min(start + 6, words.length);
+      end++
+    ) {
+      const word = words[end];
+
+      if (!(word in NUMBER_WORDS)) {
+        break;
+      }
+
+      candidateWords.push(word);
+
+      const candidate = candidateWords.join(" ");
+      const value = parseNumberWords(candidate);
+
+      if (value !== null) {
+        bestMatch = {
+          quantity: value,
+          matchedText: candidate,
+        };
+      }
+    }
+  }
+
+  return bestMatch;
+};
+
+const extractUnit = (text) => {
+  const units = Object.keys(UNIT_ALIASES).sort(
+    (a, b) => b.length - a.length
+  );
+
+  for (const unit of units) {
+    const regex = new RegExp(
+      `\\b${escapeRegex(unit)}\\b`,
+      "i"
+    );
+
+    if (regex.test(text)) {
+      return {
+        unit: UNIT_ALIASES[unit],
+        matchedText: unit,
+      };
+    }
+  }
+
+  return {
+    unit: null,
+    matchedText: null,
+  };
+};
 
 const detectIntent = (text) => {
-
-  // ADD STOCK
-  if (
-    ADD_WORDS.some((word) =>
-      new RegExp(`\\b${word}\\b`).test(text)
-    )
-  ) {
-    return "ADD_STOCK";
+  /*
+   * Check commands first because phrases like
+   * "check stock" contain the word stock.
+   */
+  for (const phrase of CHECK_PHRASES) {
+    if (
+      new RegExp(
+        `\\b${escapeRegex(phrase)}\\b`,
+        "i"
+      ).test(text)
+    ) {
+      return "CHECK_STOCK";
+    }
   }
 
-
-  // REMOVE STOCK
-  if (
-    REMOVE_WORDS.some((word) =>
-      new RegExp(`\\b${word}\\b`).test(text)
-    )
-  ) {
-    return "REMOVE_STOCK";
+  for (const action of ADD_ACTIONS) {
+    if (
+      new RegExp(
+        `\\b${escapeRegex(action)}\\b`,
+        "i"
+      ).test(text)
+    ) {
+      return "ADD_STOCK";
+    }
   }
 
-
-  // CHECK STOCK
-  if (
-    CHECK_WORDS.some((word) =>
-      text.includes(word)
-    )
-  ) {
-    return "CHECK_STOCK";
+  for (const action of REMOVE_ACTIONS) {
+    if (
+      new RegExp(
+        `\\b${escapeRegex(action)}\\b`,
+        "i"
+      ).test(text)
+    ) {
+      return "REMOVE_STOCK";
+    }
   }
-
 
   return "UNKNOWN";
 };
 
-
-// ============================================================
-// EXTRACT QUANTITY
-// ============================================================
-
-const extractQuantity = (text) => {
-
-  // ----------------------------------------------------------
-  // 1. Numeric quantity
-  //
-  // Examples:
-  // 5
-  // 10
-  // 2.5
-  // ----------------------------------------------------------
-
-  const numberMatch = text.match(
-    /\b\d+(?:\.\d+)?\b/
-  );
-
-  if (numberMatch) {
-    return Number(numberMatch[0]);
-  }
-
-
-  // ----------------------------------------------------------
-  // 2. Spoken quantity
-  //
-  // Examples:
-  // five
-  // ten
-  // twenty
-  // ----------------------------------------------------------
-
-  const words = text.split(" ");
-
-  for (const word of words) {
-
-    if (
-      NUMBER_WORDS[word] !== undefined
-    ) {
-      return NUMBER_WORDS[word];
-    }
-
-  }
-
-
-  return null;
-};
-
-
-// ============================================================
-// EXTRACT UNIT
-// ============================================================
-
-const extractUnit = (text) => {
-
-  // ----------------------------------------------------------
-  // Longest units first.
-  //
-  // Prevents:
-  //
-  // kilograms → kg
-  // grams     → g
-  // bags      → g
-  //
-  // ----------------------------------------------------------
-
-  const sortedUnits = [
-    ...UNIT_WORDS,
-  ].sort(
-    (a, b) => b.length - a.length
-  );
-
-
-  for (const unit of sortedUnits) {
-
-    const regex = new RegExp(
-      `\\b${unit}\\b`
-    );
-
-    if (regex.test(text)) {
-      return unit;
-    }
-
-  }
-
-
-  return null;
-};
-
-
-// ============================================================
-// REMOVE WORD
-// ============================================================
-
-const removeWord = (
+const cleanItemName = (
   text,
-  word
+  quantityMatch,
+  unitMatch
 ) => {
-
-  return text.replace(
-    new RegExp(
-      `\\b${word}\\b`,
-      "g"
-    ),
-    " "
-  );
-};
-
-
-// ============================================================
-// EXTRACT ITEM
-// ============================================================
-
-const extractItem = (
-  text,
-  quantity,
-  unit
-) => {
-
   let item = text;
 
-
-  // ----------------------------------------------------------
-  // Remove numeric quantity
-  //
-  // Example:
-  // "add 5 bags rice"
-  //
-  // becomes:
-  // "add bags rice"
-  // ----------------------------------------------------------
-
-  if (quantity !== null) {
-
-    const numberMatch = item.match(
-      /\b\d+(?:\.\d+)?\b/
-    );
-
-    if (numberMatch) {
-
-      item = removeWord(
-        item,
-        numberMatch[0]
-      );
-
-    }
-
-  }
-
-
-  // ----------------------------------------------------------
-  // Remove spoken number words
-  //
-  // Example:
-  // "add five bags rice"
-  //
-  // becomes:
-  // "add bags rice"
-  // ----------------------------------------------------------
-
-  Object.keys(NUMBER_WORDS).forEach(
-    (word) => {
-
-      item = removeWord(
-        item,
-        word
-      );
-
-    }
-  );
-
-
-  // ----------------------------------------------------------
-  // Remove unit
-  // ----------------------------------------------------------
-
-  if (unit) {
-
-    item = removeWord(
+  if (quantityMatch?.matchedText) {
+    item = removePhrase(
       item,
-      unit
+      quantityMatch.matchedText
     );
-
   }
 
+  if (unitMatch?.matchedText) {
+    item = removePhrase(
+      item,
+      unitMatch.matchedText
+    );
+  }
 
-  // ----------------------------------------------------------
-  // Remove ADD words
-  // ----------------------------------------------------------
-
-  ADD_WORDS.forEach(
-    (word) => {
-
-      item = removeWord(
-        item,
-        word
-      );
-
-    }
+  item = removePhrases(
+    item,
+    ADD_ACTIONS
   );
 
-
-  // ----------------------------------------------------------
-  // Remove REMOVE words
-  // ----------------------------------------------------------
-
-  REMOVE_WORDS.forEach(
-    (word) => {
-
-      item = removeWord(
-        item,
-        word
-      );
-
-    }
+  item = removePhrases(
+    item,
+    REMOVE_ACTIONS
   );
 
-
-  // ----------------------------------------------------------
-  // Remove CHECK phrases
-  // ----------------------------------------------------------
-
-  CHECK_WORDS.forEach(
-    (word) => {
-
-      item = item.replace(
-        new RegExp(
-          `\\b${word}\\b`,
-          "g"
-        ),
-        " "
-      );
-
-    }
+  item = removePhrases(
+    item,
+    CHECK_PHRASES
   );
 
-
-  // ----------------------------------------------------------
-  // Remove filler words
-  // ----------------------------------------------------------
-
-  FILLER_WORDS.forEach(
-    (word) => {
-
-      item = removeWord(
-        item,
-        word
-      );
-
-    }
+  item = removePhrases(
+    item,
+    FILLER_PHRASES
   );
 
-
-  // ----------------------------------------------------------
-  // Clean spaces
-  // ----------------------------------------------------------
-
-  return item
+  /*
+   * Remove common conversational leftovers.
+   */
+  item = item
+    .replace(/\bof\b/gi, " ")
+    .replace(/\bfor\b/gi, " ")
+    .replace(/\bto\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  return item;
 };
 
-
-// ============================================================
-// MAIN PARSER
-// ============================================================
-
 export const parseVoiceCommand = (
-  transcript
+  inputText
 ) => {
+  if (!inputText || !inputText.trim()) {
+    return {
+      intent: "UNKNOWN",
+      item: null,
+      quantity: null,
+      unit: null,
+      originalText: inputText || "",
+    };
+  }
 
-  const text = normalizeText(
-    transcript
-  );
+  const originalText = inputText;
 
-  const intent = detectIntent(
-    text
-  );
+  const text = normalizeText(inputText);
 
-  const quantity = extractQuantity(
-    text
-  );
+  const intent = detectIntent(text);
 
-  const unit = extractUnit(
-    text
-  );
+  const quantityMatch =
+    extractQuantity(text);
 
-  const item = extractItem(
+  const unitMatch =
+    extractUnit(text);
+
+  const item = cleanItemName(
     text,
-    quantity,
-    unit
+    quantityMatch,
+    unitMatch
   );
-
 
   return {
     intent,
-    item,
-    quantity,
-    unit,
-    originalText: transcript,
+    item: item || null,
+    quantity:
+      quantityMatch?.quantity ?? null,
+    unit: unitMatch?.unit ?? null,
+    originalText,
   };
 };

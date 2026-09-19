@@ -15,6 +15,14 @@ import {
   findBestInventoryMatch,
 } from "../services/voice/itemMatcher.js";
 
+import {
+  normalizeVoiceCommand,
+} from "../services/voice/languageNormalizer.js";
+
+import {
+  transcribeAudio,
+} from "../services/voice/transcriptionService.js";
+
 
 // ============================================================
 // PROCESS VOICE COMMAND
@@ -169,14 +177,30 @@ export const processVoiceCommand = async (req, res) => {
     // PARSE NEW VOICE COMMAND
     // ==========================================================
 
-    const command =
-      parseVoiceCommand(transcript);
+    const normalizedTranscript =
+        normalizeVoiceCommand(transcript);
 
-    console.log(
-      "Voice command:",
-      command
-    );
+        console.log(
+        "Original transcript:",
+        transcript
+        );
 
+        console.log(
+        "Normalized transcript:",
+        normalizedTranscript
+        );
+        console.log(
+        "NORMALIZED:",
+        normalizeVoiceCommand(transcript)
+        );
+
+        const command =
+        parseVoiceCommand(normalizedTranscript);
+
+        console.log(
+        "Voice command:",
+        command
+        );
 
     // ==========================================================
     // UNKNOWN COMMAND
@@ -566,6 +590,59 @@ export const processVoiceCommand = async (req, res) => {
 
       error:
         error.message,
+    });
+  }
+};
+
+export const transcribeVoiceAudio = async (
+  req,
+  res
+) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Audio file is required",
+      });
+    }
+
+    console.log("Audio received:");
+    console.log({
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size,
+    });
+
+    const transcript =
+      await transcribeAudio({
+        buffer: req.file.buffer,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+      });
+
+    console.log(
+      "Transcription:",
+      transcript
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Audio transcribed successfully",
+      data: {
+        transcript,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Transcription error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Failed to transcribe audio",
     });
   }
 };
